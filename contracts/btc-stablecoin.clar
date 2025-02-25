@@ -127,3 +127,71 @@
         (ok true)
     ))
 )
+
+;; Risk Management
+
+;; Liquidate undercollateralized positions
+(define-public (liquidate (vault-owner principal))
+    (let (
+        (vault (unwrap! (map-get? vaults vault-owner) err-low-balance))
+        (collateral-value (* (get collateral vault) (var-get last-price)))
+    )
+    (begin
+        (asserts! (is-authorized-liquidator tx-sender) err-owner-only)
+        ;; Collateral Ratio < Liquidation Threshold
+        (asserts! (< (* collateral-value u100)
+            (* (get debt vault) (var-get liquidation-ratio))
+            err-insufficient-collateral)
+            
+        ;; Atomic position closure
+        (let ((collateral-to-transfer (get collateral vault)))
+            (map-delete vaults vault-owner)
+            (try! (as-contract (stx-transfer? collateral-to-transfer 
+                (as-contract tx-sender) tx-sender)))
+            (ok true)
+        )
+    ))
+)
+
+;; Oracle Operations
+
+(define-public (update-price (new-price uint))
+    (begin
+        (asserts! (is-authorized-oracle tx-sender) err-owner-only)
+        (asserts! (is-valid-price new-price) err-invalid-parameter)
+        (var-set last-price new-price)
+        (var-set price-valid true)
+        (ok true)
+    )
+)
+
+;; Governance Operations
+
+(define-public (set-risk-parameters 
+    (new-mcr uint) 
+    (new-lr uint) 
+    (new-fee uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (is-valid-ratio new-mcr) err-invalid-parameter)
+        (asserts! (is-valid-ratio new-lr) err-invalid-parameter)
+        (asserts! (is-valid-fee new-fee) err-invalid-parameter)
+        (asserts! (> new-mcr new-lr) err-invalid-parameter)
+        
+        (var-set minimum-collateral-ratio new-mcr)
+        (var-set liquidation-ratio new-lr)
+        (var-set stability-fee new-fee)
+        (ok true)
+    )
+)
+
+;; Protocol Safety
+
+(define-public (trigger-emergency-shutdown))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (var-set emergency-shutdown true)
+        ;; Freeze all minting/withdrawals while allowing repayments
+        (ok true)
+    )
+)
