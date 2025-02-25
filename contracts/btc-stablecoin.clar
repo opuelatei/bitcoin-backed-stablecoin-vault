@@ -58,3 +58,72 @@
     debt: uint,           ;; Outstanding stablecoin debt
     last-fee-timestamp: uint  ;; Last fee accrual time
 })
+
+;; Authorized Actors
+(define-map liquidators principal bool)   ;; Approved liquidation bots
+(define-map price-oracles principal bool) ;; Trusted price feed providers
+
+;; Parameter Validation
+
+(define-private (is-valid-price (price uint))
+    (and 
+        (>= price minimum-price)
+        (<= price maximum-price)
+    )
+)
+
+(define-private (is-valid-ratio (ratio uint))
+    (and 
+        (>= ratio u101)  ;; Minimum 101% for anti-manipulation
+        (<= ratio u1000) ;; Maximum 1000% for usability
+    )
+)
+
+(define-private (is-valid-fee (fee uint))
+    (<= fee u100)  ;; Maximum 100% annual fee
+)
+
+;; User Operations
+
+;; Create new collateralized debt position
+(define-public (create-vault (collateral-amount uint))
+    (let (
+        (existing-vault (default-to 
+            {  ;; Initialize new vault
+                collateral: u0,
+                debt: u0,
+                last-fee-timestamp: (unwrap-panic (get-block-info? time u0))
+            }
+            (map-get? vaults tx-sender)
+        ))
+    )
+    (begin
+        (asserts! (var-get initialized) err-not-initialized)
+        (asserts! (not (var-get emergency-shutdown)) err-emergency-shutdown)
+        (try! (stx-transfer? collateral-amount tx-sender (as-contract tx-sender)))
+        (map-set vaults tx-sender 
+            (merge existing-vault {
+                collateral: (+ collateral-amount (get collateral existing-vault))
+            })
+        )
+        (ok true)
+    ))
+)
+
+;; Generate stablecoins against collateral
+(define-public (mint-stablecoin (amount uint))
+    (let (
+        (vault (unwrap! (map-get? vaults tx-sender) err-low-balance))
+        (current-collateral (get collateral vault))
+        (new-debt (+ (get debt vault) amount))
+        (collateral-value (* current-collateral (var-get last-price)))
+    )
+    (begin
+        (asserts! (var-get price-valid) err-invalid-price)
+        (asserts! (>= (* collateral-value u100) 
+            (* new-debt (var-get minimum-collateral-ratio)) 
+            err-below-mcr)
+        (map-set vaults tx-sender (merge vault {debt: new-debt}))
+        (ok true)
+    ))
+)
