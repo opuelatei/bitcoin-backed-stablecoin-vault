@@ -195,3 +195,33 @@
         (ok true)
     )
 )
+
+;; Data Views
+
+(define-read-only (get-vault-health (owner principal))
+    (let (
+        (vault (unwrap! (map-get? vaults owner) err-low-balance))
+        (debt (get debt vault))
+    )
+    (if (is-eq debt u0)
+        (ok u0)
+        (ok (/ (* (get collateral vault) (var-get last-price)) debt))
+    ))
+)
+
+;; Protocol status summary
+(define-read-only (get-protocol-status))
+    {
+        total-collateral: (stx-get-balance (as-contract tx-sender)),
+        outstanding-debt: (fold sum-vault-debt u0 (map-values vaults)),
+        mcr: (var-get minimum-collateral-ratio),
+        lr: (var-get liquidation-ratio),
+        price: (var-get last-price),
+        shutdown-mode: (var-get emergency-shutdown)
+    }
+)
+
+(define-private (sum-vault-debt (entry {collateral: uint, debt: uint, last-fee-timestamp: uint}) 
+    (+ (get debt entry) acc)
+)
+)
